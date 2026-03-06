@@ -1,5 +1,4 @@
 import json
-import base64
 import os
 from openai import AsyncOpenAI
 from database import search_products

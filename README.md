@@ -1,15 +1,16 @@
 # Cashierless API
 
-Backend API for autonomous retail stores with AI-powered product recognition and payment processing. Built with FastAPI, OpenAI GPT-4o Vision, SQLite, and Forte Bank integration.
+Backend API for autonomous retail stores with AI-powered product recognition and payment processing. Built with FastAPI, Ollama (Qwen3.5), SQLite, and Forte Bank integration.
 
 ## Features
 
-- 📷 **AI Product Recognition** - Uses OpenAI GPT-4o Vision to identify products from images
+- 📷 **AI Product Recognition** - Uses Ollama with Qwen3.5 model to identify products from images (local, no API costs)
 - 💳 **Payment Processing** - Integration with Forte Bank HPP (Hosted Payment Page) for secure payments
 - 🔍 **Smart Search** - LIKE-based product search in SQLite database
 - 🌐 **RESTful API** - Clean and documented endpoints
 - 🚀 **Async/IO** - Built with aiosqlite for high performance
 - 📱 **Mobile-Ready** - Designed for mobile app integration with polling and callbacks
+- 💰 **Cost-Effective** - Local AI inference with Ollama, no external API costs for recognition
 
 ## Architecture
 
@@ -22,7 +23,8 @@ mobile-app-api/
 │   ├── checkout.py         # Checkout, payment & status endpoints
 │   └── products.py          # Products list endpoint
 ├── services/
-│   ├── openai_service.py   # OpenAI GPT-4o Vision integration
+│   ├── ollama_service.py   # Ollama Qwen3.5 integration (local AI)
+│   ├── openai_service.py   # OpenAI GPT-4o Vision integration (alternative)
 │   └── forte_service.py    # Forte Bank payment integration
 ├── .env.example            # Environment variables template
 ├── .gitignore              # Git ignore rules
@@ -33,18 +35,46 @@ mobile-app-api/
 ## Tech Stack
 
 - **Framework**: FastAPI 0.133.1
-- **AI**: OpenAI GPT-4o Vision
+- **AI**: Ollama with Qwen3.5:4b model (local inference)
 - **Database**: SQLite with aiosqlite
 - **Payment**: Forte Bank API (HPP - Hosted Payment Page)
 - **HTTP Client**: httpx 0.28.1
+- **Image Processing**: Pillow 12.1.1
 
 ## Getting Started
 
 ### Prerequisites
 
 - Python 3.11+
-- OpenAI API key
+- **Ollama** installed and running (for local AI inference)
 - Forte Bank API credentials (for production)
+
+### Installing Ollama
+
+Before running the application, you need to install Ollama and download the Qwen3.5 model:
+
+**macOS/Linux:**
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull the Qwen3.5 model
+ollama pull qwen3.5:4b
+
+# Start Ollama service (usually starts automatically)
+ollama serve
+```
+
+**Windows:**
+Download and install from [ollama.com](https://ollama.com/download), then run:
+```powershell
+ollama pull qwen3.5:4b
+```
+
+Verify Ollama is running:
+```bash
+curl http://localhost:11434/api/tags
+```
 
 ### Installation
 
@@ -84,12 +114,13 @@ pip install -r requirements.txt
 Required packages:
 - fastapi==0.133.1
 - aiosqlite==0.22.1
-- openai==2.24.0
+- openai==2.24.0 (used for Ollama compatibility)
 - uvicorn==0.41.0
 - pydantic==2.12.5
 - python-dotenv==1.2.1
 - httpx==0.28.1
 - python-multipart==0.0.22
+- pillow==12.1.1
 
 #### 4. Set up environment variables
 
@@ -100,19 +131,27 @@ cp .env.example .env
 Edit `.env` with your credentials:
 
 ```env
-# Required: OpenAI API key for GPT-4o Vision
+# Optional: OpenAI API key (if you want to use OpenAI instead of Ollama)
 OPENAI_API_KEY=sk-your-openai-key
 
-# Optional: SQLite database path (default: shop.db)
+# SQLite database path (default: shop.db)
 DB_PATH=shop.db
 
 # Forte Bank API settings
-FORTE_BASE_URL=http://localhost:8082
-FORTE_LOGIN=TerminalSys/Login1
-FORTE_PASSWORD=Password1234
+FORTE_BASE_URL=https://sandbox.forte.kz/api/v1
+FORTE_API_KEY=your_forte_key
+FORTE_MERCHANT_ID=your_merchant_id
+NGROK_URL=https://xxxx.ngrok-free.app
 ```
 
 ### Running the Application
+
+#### Start Ollama (if not running)
+
+In a separate terminal:
+```bash
+ollama serve
+```
 
 #### Development Mode (with auto-reload)
 
@@ -280,7 +319,7 @@ Returns the API status.
 POST /recognize
 ```
 
-Recognize products from a base64-encoded image.
+Recognize products from a base64-encoded image using Ollama Qwen3.5 model.
 
 **Request Body:**
 ```json
@@ -404,40 +443,40 @@ Status values: `pending` | `paid` | `failed`
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│   Mobile    │      │   FastAPI    │      │   OpenAI    │
-│   App       │─────▶│   Backend    │─────▶│   GPT-4o    │
+│   Mobile    │      │   FastAPI    │      │   Ollama    │
+│   App       │─────▶│   Backend    │─────▶│   Qwen3.5   │
 └─────────────┘      └──────────────┘      └─────────────┘
-                           │                      │
-                           │                      ▼
-                           │              ┌──────────────┐
-                           │              │   Identify   │
-                           │              │   Products   │
-                           │              └──────────────┘
-                           │                      │
-                           │                      ▼
-                           │              ┌──────────────┐
-                           │              │   Function   │
-                           │              │   Calling    │
-                           │              └──────────────┘
-                           │                      │
-                           ▼                      ▼
-                    ┌──────────────┐      ┌──────────────┐
-                    │   SQLite DB  │◀─────│   Search     │
-                    │              │      │   Products   │
-                    └──────────────┘      └──────────────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │   Return     │
-                    │   Results    │
-                    └──────────────┘
+                            │                      │
+                            │                      ▼
+                            │              ┌──────────────┐
+                            │              │   Identify   │
+                            │              │   Products   │
+                            │              └──────────────┘
+                            │                      │
+                            │                      ▼
+                            │              ┌──────────────┐
+                            │              │   Function   │
+                            │              │   Calling    │
+                            │              └──────────────┘
+                            │                      │
+                            ▼                      ▼
+                     ┌──────────────┐      ┌──────────────┐
+                     │   SQLite DB  │◀─────│   Search     │
+                     │              │      │   Products   │
+                     └──────────────┘      └──────────────┘
+                            │
+                            ▼
+                     ┌──────────────┐
+                     │   Return     │
+                     │   Results    │
+                     └──────────────┘
 ```
 
 1. **Image Upload**: Client sends base64-encoded image to `/recognize`
-2. **Vision Analysis**: OpenAI GPT-4o analyzes the image and identifies visible products
-3. **Function Calling**: GPT-4o calls `search_products` tool with product names
+2. **Vision Analysis**: Ollama Qwen3.5 analyzes the image and identifies visible products
+3. **Function Calling**: Qwen3.5 calls `search_products` tool with product names
 4. **Database Search**: LIKE search in SQLite database
-5. **Result Compilation**: GPT-4o formats results with confidence scores and quantities
+5. **Result Compilation**: Qwen3.5 formats results with confidence scores and quantities
 
 ### Payment Flow
 
@@ -495,11 +534,12 @@ Interactive API documentation is available at:
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| OPENAI_API_KEY | OpenAI API key for GPT-4o Vision | Yes | - |
+| OPENAI_API_KEY | OpenAI API key (optional, for OpenAI mode) | No | - |
 | DB_PATH | SQLite database file path | No | shop.db |
-| FORTE_BASE_URL | Forte Bank API base URL | No | http://localhost:8082 |
-| FORTE_LOGIN | Forte API login | No | TerminalSys/Login1 |
-| FORTE_PASSWORD | Forte API password | No | Password1234 |
+| FORTE_BASE_URL | Forte Bank API base URL | No | https://sandbox.forte.kz/api/v1 |
+| FORTE_API_KEY | Forte API key | No | - |
+| FORTE_MERCHANT_ID | Forte merchant ID | No | - |
+| NGROK_URL | Ngrok URL for callbacks | No | - |
 
 ## Development
 
@@ -518,6 +558,25 @@ pip install black
 black .
 ```
 
+### Switching Between Ollama and OpenAI
+
+The project supports both Ollama (local) and OpenAI (cloud) for product recognition.
+
+**Using Ollama (default):**
+- Ensure Ollama is running: `ollama serve`
+- The service is already configured in `routers/recognize.py`
+
+**Using OpenAI:**
+1. Set your `OPENAI_API_KEY` in `.env`
+2. Uncomment the import in `routers/recognize.py`:
+   ```python
+   from services.openai_service import recognize_from_image
+   ```
+3. Change the function call:
+   ```python
+   result = await recognize_from_image(req.image_base64)
+   ```
+
 ## Troubleshooting
 
 ### Database not created
@@ -526,6 +585,13 @@ The database is automatically created on first run. If you encounter issues:
 
 1. Delete `shop.db` if it exists
 2. Restart the application
+
+### Ollama connection issues
+
+- Ensure Ollama is running: `ollama serve`
+- Verify Ollama is accessible: `curl http://localhost:11434/api/tags`
+- Check that the model is downloaded: `ollama list`
+- Pull the model if needed: `ollama pull qwen3.5:4b`
 
 ### OpenAI API errors
 
@@ -536,8 +602,9 @@ The database is automatically created on first run. If you encounter issues:
 ### Forte Bank connection issues
 
 - Verify `FORTE_BASE_URL` is correct
-- Check login credentials
+- Check API key and merchant ID
 - Ensure Forte Bank service is running (for local development)
+- Use ngrok for local development callbacks
 
 ### Port already in use
 
