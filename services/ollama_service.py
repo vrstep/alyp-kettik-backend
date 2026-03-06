@@ -106,7 +106,6 @@ async def recognize_from_image_ollama(image_base64: str) -> dict:
             args = json.loads(tool_call.function.arguments)
             queries = args.get("queries", [])
 
-            # ←←← ГЛАВНЫЙ ФИКС ←←←
             if asyncio.iscoroutinefunction(search_products):
                 db_results = await search_products(queries)
             else:
