@@ -1,6 +1,5 @@
 import json
 import re
-import asyncio
 from openai import AsyncOpenAI
 from database import search_products
 
@@ -9,7 +8,6 @@ client = AsyncOpenAI(
     api_key="ollama",
 )
 
-# ── Твои TOOLS (оставь как было) ─────────────────────────────────────
 TOOLS = [
     {
         "type": "function",
@@ -37,34 +35,41 @@ CRITICAL RULES:
 - Analyze the photo carefully.
 - Call search_products tool ONCE with ALL product names you see.
 - After getting results, return ONLY valid JSON. NO thinking, NO <think>, NO explanations, NO markdown.
+- ALWAYS use the product from database results even if the name doesn't match exactly.
+- If DB returned a similar product (e.g. "Sprite 0.5L" for "Sprite 1L"), use it — never put it in unrecognized.
+- Only put in unrecognized if DB returned NO results at all for that product.
 
 Final response format (must be exactly this):
 {
   "recognized_items": [
     {
       "product_id": 1,
-      "name": "Red Bull 0.25L",
-      "price": 350.00,
+      "name": "Coca-Cola 1L",
+      "price": 450.00,
       "quantity": 1,
       "confidence": 0.98
     }
   ],
   "unrecognized": [],
-  "total": 350.00
+  "total": 450.00
 }
 """
 
+
 def clean_json_response(raw: str) -> str:
     if not raw:
-        return "{}"
+        return ""
     raw = raw.strip()
     raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL | re.IGNORECASE)
-    if raw.startswith("```json"):
-        raw = raw[7:]
-    elif raw.startswith("```"):
-        raw = raw[3:]
+    raw = raw.strip()
+    for prefix in ("```json", "```"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):]
     if "```" in raw:
         raw = raw.split("```")[0]
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return raw[start:end + 1]
     return raw.strip()
 
 
@@ -86,7 +91,7 @@ async def recognize_from_image_ollama(image_base64: str) -> dict:
         },
     ]
 
-    # Шаг 1: Анализ фото + tool call
+    # Шаг 1: анализ фото + tool call
     response = await client.chat.completions.create(
         model="qwen3.5:4b",
         messages=messages,
@@ -99,26 +104,44 @@ async def recognize_from_image_ollama(image_base64: str) -> dict:
 
     msg = response.choices[0].message
 
-    # Шаг 2: Поиск в БД (ИСПРАВЛЕНО — работает и с sync, и с async функцией)
-    db_results = []
-    if msg.tool_calls:
-        for tool_call in msg.tool_calls:
-            args = json.loads(tool_call.function.arguments)
-            queries = args.get("queries", [])
+    if not msg.tool_calls:
+        raise ValueError("Model did not call the tool")
 
-            if asyncio.iscoroutinefunction(search_products):
-                db_results = await search_products(queries)
-            else:
-                db_results = await asyncio.to_thread(search_products, queries)
+    # Шаг 2: собираем ВСЕ queries из ВСЕХ tool_calls
+    all_queries = []
+    for tc in msg.tool_calls:
+        args = json.loads(tc.function.arguments)
+        all_queries.extend(args.get("queries", []))
 
-        messages.append(msg)
+    db_results = await search_products(all_queries)
+    db_json = json.dumps(db_results, ensure_ascii=False, default=str)
+
+    # Добавляем assistant message как dict (не SDK-объект)
+    messages.append({
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in msg.tool_calls
+        ],
+    })
+
+    # Tool result для КАЖДОГО tool_call
+    for tc in msg.tool_calls:
         messages.append({
             "role": "tool",
-            "tool_call_id": msg.tool_calls[0].id,
-            "content": json.dumps(db_results, ensure_ascii=False, default=str),
+            "tool_call_id": tc.id,
+            "content": db_json,
         })
 
-    # Шаг 3: Финальный JSON
+    # Шаг 3: финальный JSON
     final_response = await client.chat.completions.create(
         model="qwen3.5:4b",
         messages=messages,
@@ -129,15 +152,14 @@ async def recognize_from_image_ollama(image_base64: str) -> dict:
     )
 
     raw = final_response.choices[0].message.content or ""
-    clean_raw = clean_json_response(raw)
+    print(final_response)
 
-    # Отладка в консоли (после теста можешь закомментировать)
-    print("=== RAW FROM QWEN ===")
-    print(repr(raw[:500]))
-    print("=== CLEANED ===")
-    print(repr(clean_raw))
+    clean = clean_json_response(raw)
+    if not clean:
+        raise ValueError(f"Model returned empty response. Raw: {raw[:300]}")
 
     try:
-        return json.loads(clean_raw)
+        return json.loads(clean)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Model returned invalid JSON: {clean_raw[:300]}") from e
+        raise ValueError(f"Invalid JSON: {clean[:300]}") from e
+    
