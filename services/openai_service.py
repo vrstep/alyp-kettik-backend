@@ -59,14 +59,14 @@ Response format (after tool call):
 Rules:
 - If multiple identical items visible, set quantity > 1
 - confidence: 0.0-1.0 based on how clearly you see the product
+- ALWAYS use the product from database results even if the name doesn't match exactly
+- If DB returned a similar product (e.g. "Sprite 0.5L" for "Sprite 1L"), use it — never put it in unrecognized
+- Only put in unrecognized if DB returned NO results at all for that product
 - Always respond in the JSON format above after the tool call
 """
 
 
 async def recognize_from_image(image_base64: str) -> dict:
-    """
-    Полный цикл: изображение → OpenAI Vision → function calling → DB поиск → результат.
-    """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -81,40 +81,61 @@ async def recognize_from_image(image_base64: str) -> dict:
                 },
                 {
                     "type": "text",
-                    "text": "Please identify all products in this photo and search for them in the database.",
+                    "text": "Identify all products in this photo and search for them in the database.",
                 },
             ],
         },
     ]
 
-    # ── Шаг 1: GPT-4o анализирует фото ────────────────────────────────────────
+    # Шаг 1: GPT-4o анализирует фото
     response = await client.chat.completions.create(
-        model="gpt-5-mini-2025-08-07",
+        model="gpt-4o",
         messages=messages,
         tools=TOOLS,
-        tool_choice="required",  # обязываем вызвать tool
+        tool_choice="required",
         max_tokens=1000,
     )
 
     msg = response.choices[0].message
 
-    # ── Шаг 2: Выполняем поиск в БД ───────────────────────────────────────────
-    db_results = []
-    if msg.tool_calls:
-        for tool_call in msg.tool_calls:
-            args = json.loads(tool_call.function.arguments)
-            queries = args.get("queries", [])
-            db_results = await search_products(queries)
+    if not msg.tool_calls:
+        raise ValueError("Model did not call the tool")
 
-        # Добавляем ответ модели и результат tool в messages
-        messages.append(msg)
+    # Шаг 2: собираем ВСЕ queries из ВСЕХ tool_calls, ищем одним запросом
+    all_queries = []
+    for tc in msg.tool_calls:
+        args = json.loads(tc.function.arguments)
+        all_queries.extend(args.get("queries", []))
+
+    db_results = await search_products(all_queries)
+    db_json = json.dumps(db_results, ensure_ascii=False, default=str)
+
+    # Добавляем assistant message
+    messages.append({
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in msg.tool_calls
+        ],
+    })
+
+    # Добавляем tool result для КАЖДОГО tool_call (обязательно!)
+    for tc in msg.tool_calls:
         messages.append({
             "role": "tool",
-            "tool_call_id": msg.tool_calls[0].id,
-            "content": json.dumps(db_results, ensure_ascii=False, default=str),
+            "tool_call_id": tc.id,
+            "content": db_json,
         })
 
-    # ── Шаг 3: GPT-4o формирует финальный ответ ───────────────────────────────
+    # Шаг 3: финальный JSON
     final_response = await client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
@@ -122,5 +143,6 @@ async def recognize_from_image(image_base64: str) -> dict:
         response_format={"type": "json_object"},
     )
 
-    raw = final_response.choices[0].message.content
-    return json.loads(raw)
+    print(final_response)
+
+    return json.loads(final_response.choices[0].message.content)

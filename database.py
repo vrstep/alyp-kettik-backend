@@ -47,33 +47,37 @@ async def init_db():
 
 
 async def search_products(queries: list[str]) -> list[dict]:
-    """
-    LIKE-поиск по имени и описанию.
-    Для каждого запроса берём топ-2 результата, дедуплицируем по id.
-    """
     results = []
     seen_ids: set[int] = set()
 
     async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row  # доступ по имени колонки
+        db.row_factory = aiosqlite.Row
 
         for q in queries:
-            pattern = f"%{q}%"
-            cursor = await db.execute(
-                """
-                SELECT id, name, category, description, price, image_url, barcode
-                FROM products
-                WHERE in_stock = 1
-                  AND (name LIKE ? OR description LIKE ?)
-                LIMIT 2
-                """,
-                (pattern, pattern),
-            )
-            rows = await cursor.fetchall()
-            for row in rows:
-                if row["id"] not in seen_ids:
-                    seen_ids.add(row["id"])
-                    results.append(dict(row))
+            # Сначала ищем по полной фразе
+            candidates = [q]
+
+            # Добавляем поиск по каждому значимому слову (длиннее 2 букв)
+            words = [w for w in q.split() if len(w) > 2]
+            candidates.extend(words)
+
+            for term in candidates:
+                pattern = f"%{term}%"
+                cursor = await db.execute(
+                    """
+                    SELECT id, name, category, description, price, image_url, barcode
+                    FROM products
+                    WHERE in_stock = 1
+                      AND (name LIKE ? OR description LIKE ?)
+                    LIMIT 2
+                    """,
+                    (pattern, pattern),
+                )
+                rows = await cursor.fetchall()
+                for row in rows:
+                    if row["id"] not in seen_ids:
+                        seen_ids.add(row["id"])
+                        results.append(dict(row))
 
     return results
 
@@ -193,3 +197,4 @@ async def delete_product(product_id: int) -> bool:
         cursor = await db.execute("DELETE FROM products WHERE id = ?", (product_id,))
         await db.commit()
         return cursor.rowcount > 0
+    
