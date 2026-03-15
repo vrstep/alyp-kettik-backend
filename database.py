@@ -20,6 +20,34 @@ async def init_db():
                 created_at  TEXT DEFAULT (datetime('now'))
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                email         TEXT NOT NULL UNIQUE,
+                name          TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at    TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS shopping_sessions (
+                id          TEXT PRIMARY KEY,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                store_id    TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'active',
+                started_at  TEXT DEFAULT (datetime('now')),
+                ended_at    TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS session_cart_items (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  TEXT NOT NULL REFERENCES shopping_sessions(id),
+                product_id  INTEGER NOT NULL REFERENCES products(id),
+                quantity    INTEGER NOT NULL DEFAULT 1,
+                added_at    TEXT DEFAULT (datetime('now'))
+            )
+        """)
         await db.commit()
 
         # Наполняем только если таблица пустая
@@ -44,6 +72,164 @@ async def init_db():
                 ],
             )
             await db.commit()
+
+
+
+# ── User helpers ───────────────────────────────────────────────────────────────
+
+async def create_user(email: str, name: str, password_hash: str) -> int:
+    """Create a new user and return their ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)",
+            (email, name, password_hash),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_user_by_email(email: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM users WHERE email = ?", (email,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_user_by_id(user_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+# ── Shopping session helpers ───────────────────────────────────────────────────
+
+async def create_session(session_id: str, user_id: int, store_id: str) -> dict:
+    """Create a new shopping session and return it."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO shopping_sessions (id, user_id, store_id, status)
+               VALUES (?, ?, ?, 'active')""",
+            (session_id, user_id, store_id),
+        )
+        await db.commit()
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM shopping_sessions WHERE id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row)
+
+
+async def get_active_session(user_id: int) -> dict | None:
+    """Get the user's current active shopping session."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM shopping_sessions WHERE user_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_session_by_id(session_id: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM shopping_sessions WHERE id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def update_session_status(session_id: str, status: str) -> bool:
+    """Update session status (active → completed / cancelled)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        ended = "datetime('now')" if status in ("completed", "cancelled") else "NULL"
+        await db.execute(
+            f"UPDATE shopping_sessions SET status = ?, ended_at = {ended} WHERE id = ?",
+            (status, session_id),
+        )
+        await db.commit()
+        return True
+
+
+# ── Session cart item helpers ──────────────────────────────────────────────────
+
+async def add_cart_item(session_id: str, product_id: int, quantity: int = 1) -> dict:
+    """Add an item to the session cart (or increase quantity if exists)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Check if item already in cart
+        cursor = await db.execute(
+            "SELECT * FROM session_cart_items WHERE session_id = ? AND product_id = ?",
+            (session_id, product_id),
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            new_qty = existing["quantity"] + quantity
+            await db.execute(
+                "UPDATE session_cart_items SET quantity = ? WHERE id = ?",
+                (new_qty, existing["id"]),
+            )
+            await db.commit()
+            cursor = await db.execute(
+                "SELECT * FROM session_cart_items WHERE id = ?", (existing["id"],)
+            )
+        else:
+            cursor = await db.execute(
+                "INSERT INTO session_cart_items (session_id, product_id, quantity) VALUES (?, ?, ?)",
+                (session_id, product_id, quantity),
+            )
+            await db.commit()
+            item_id = cursor.lastrowid
+            cursor = await db.execute(
+                "SELECT * FROM session_cart_items WHERE id = ?", (item_id,)
+            )
+        row = await cursor.fetchone()
+        return dict(row)
+
+
+async def get_cart_items(session_id: str) -> list[dict]:
+    """Get all cart items for a session, joined with product info."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT ci.id, ci.session_id, ci.product_id, ci.quantity, ci.added_at,
+                      p.name, p.price, p.category, p.image_url, p.barcode
+               FROM session_cart_items ci
+               JOIN products p ON p.id = ci.product_id
+               WHERE ci.session_id = ?
+               ORDER BY ci.added_at""",
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def update_cart_item_qty(item_id: int, quantity: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if quantity <= 0:
+            await db.execute("DELETE FROM session_cart_items WHERE id = ?", (item_id,))
+        else:
+            await db.execute(
+                "UPDATE session_cart_items SET quantity = ? WHERE id = ?",
+                (quantity, item_id),
+            )
+        await db.commit()
+        return True
+
+
+async def remove_cart_item(item_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM session_cart_items WHERE id = ?", (item_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 async def search_products(queries: list[str]) -> list[dict]:

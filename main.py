@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from database import init_db
-from routers import recognize, checkout, products
+from routers import recognize, checkout, products, auth, sessions
 
 
 @asynccontextmanager
@@ -24,6 +24,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
+app.include_router(sessions.router)
 app.include_router(recognize.router)
 app.include_router(checkout.router)
 app.include_router(products.router)
