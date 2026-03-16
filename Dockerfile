@@ -2,9 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies for bcrypt
+# Install system dependencies for bcrypt and asyncpg
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev && \
+    gcc libffi-dev libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -12,10 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Create data directory for SQLite persistence
-RUN mkdir -p /data
-
-ENV DB_PATH=/data/shop.db
 ENV PORT=8000
 
 EXPOSE 8000

@@ -5,14 +5,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from database import init_db
+from database import init_db, get_pool
 from routers import recognize, checkout, products, auth, sessions
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()   
+    await init_db()
     yield
+    pool = await get_pool()
+    await pool.close()
 
 
 app = FastAPI(title="Cashierless API", lifespan=lifespan)
