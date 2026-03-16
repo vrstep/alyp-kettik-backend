@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: alyp-kettik-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DB_PATH
+        value: /data/shop.db
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1
