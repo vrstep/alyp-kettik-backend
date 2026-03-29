@@ -6,7 +6,8 @@ from database import (
     get_product_by_id,
     create_product,
     update_product,
-    delete_product
+    delete_product,
+    reseed_products,
 )
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -128,3 +129,16 @@ async def delete_product_endpoint(product_id: int):
         raise HTTPException(status_code=404, detail="Product not found")
     
     return None
+
+
+@router.post("/reseed")
+async def reseed_products_endpoint():
+    """
+    Re-seed the products table with the 5 YOLO-detectable products.
+    WARNING: This clears all existing products and cart items.
+    """
+    try:
+        await reseed_products()
+        return {"message": "Products re-seeded successfully", "count": 5}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Re-seed failed: {e}")

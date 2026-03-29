@@ -26,10 +26,25 @@ async def init_db():
                 price       NUMERIC(10,2) NOT NULL,
                 image_url   TEXT,
                 barcode     TEXT,
+                yolo_class  TEXT,
                 in_stock    INTEGER DEFAULT 1,
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+
+        # Add yolo_class column if it doesn't exist (for existing DBs)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'products' AND column_name = 'yolo_class'
+                ) THEN
+                    ALTER TABLE products ADD COLUMN yolo_class TEXT;
+                END IF;
+            END $$;
+        """)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id            SERIAL PRIMARY KEY,
@@ -64,19 +79,14 @@ async def init_db():
         if count == 0:
             await conn.executemany(
                 """INSERT INTO products
-                   (name, category, description, price, barcode)
-                   VALUES ($1, $2, $3, $4, $5)""",
+                   (name, category, description, price, barcode, yolo_class)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
                 [
-                    ("Coca-Cola 1L",         "Напитки",  "Газированный напиток Coca-Cola 1 литр",       450,  "4870200013834"),
-                    ("Lay's Сметана 150г",   "Снеки",    "Чипсы картофельные со вкусом сметаны",        350,  "4823063107456"),
-                    ("Sprite 0.5L",          "Напитки",  "Газированный напиток Sprite 500 мл",           320,  "5449000014238"),
-                    ("Шоколад Milka 90г",    "Сладости", "Молочный шоколад с альпийским молоком",        520,  "7622300441937"),
-                    ("Чай Lipton 25 пак",    "Продукты", "Чай чёрный в пакетиках",                       680,  "8712100851637"),
-                    ("Red Bull 250мл",       "Напитки",  "Энергетический напиток Red Bull",              750,  "9002490100070"),
-                    ("Snickers 50г",         "Сладости", "Шоколадный батончик Snickers",                 280,  "4600831012501"),
-                    ("Orbit Spearmint",      "Прочее",   "Жевательная резинка Orbit мята",               250,  "4009900476003"),
-                    ("Вода Bonaqua 1L",      "Напитки",  "Питьевая вода без газа",                       200,  "4870200011502"),
-                    ("Pringles Original",    "Снеки",    "Чипсы Pringles в тубе оригинальные",           890,  "0038000845598"),
+                    ("BonAqua 1L",       "Напитки",  "Питьевая вода BonAqua без газа 1 литр",          200,  "4870200011502", "bon_aqua_1l"),
+                    ("Coca-Cola 1L",     "Напитки",  "Газированный напиток Coca-Cola 1 литр",          450,  "4870200013834", "coca_cola_1l"),
+                    ("Milka Almond 80g", "Сладости", "Молочный шоколад Milka с миндалём 80 г",         520,  "7622300441937", "milka_almond_80g"),
+                    ("Piala 25 пак",     "Продукты", "Чай Piala чёрный в пакетиках 25 шт",             680,  "8712100851637", "piala_25b"),
+                    ("Red Bull 250мл",   "Напитки",  "Энергетический напиток Red Bull 250 мл",         750,  "9002490100070", "red_bull_250ml"),
                 ],
             )
 
@@ -264,7 +274,7 @@ async def get_all_products() -> list[dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name, category, description, price, image_url, barcode, in_stock, created_at
+            SELECT id, name, category, description, price, image_url, barcode, yolo_class, in_stock, created_at
             FROM products
             ORDER BY name
             """
@@ -278,13 +288,53 @@ async def get_product_by_id(product_id: int) -> dict | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, name, category, description, price, image_url, barcode, in_stock, created_at
+            SELECT id, name, category, description, price, image_url, barcode, yolo_class, in_stock, created_at
             FROM products
             WHERE id = $1
             """,
             product_id,
         )
         return dict(row) if row else None
+
+
+async def get_product_by_yolo_class(yolo_class: str) -> dict | None:
+    """Return a product by its YOLO detection class name."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, name, category, description, price, image_url, barcode, yolo_class, in_stock, created_at
+            FROM products
+            WHERE yolo_class = $1
+            """,
+            yolo_class,
+        )
+        return dict(row) if row else None
+
+
+async def reseed_products():
+    """Clear all products and cart items, then re-seed with YOLO-detectable products."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Clear cart items first (FK constraint)
+        await conn.execute("DELETE FROM session_cart_items")
+        await conn.execute("DELETE FROM products")
+        # Reset sequence
+        await conn.execute("ALTER SEQUENCE products_id_seq RESTART WITH 1")
+        # Re-seed
+        await conn.executemany(
+            """INSERT INTO products
+               (name, category, description, price, barcode, yolo_class)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            [
+                ("BonAqua 1L",       "Напитки",  "Питьевая вода BonAqua без газа 1 литр",          200,  "4870200011502", "bon_aqua_1l"),
+                ("Coca-Cola 1L",     "Напитки",  "Газированный напиток Coca-Cola 1 литр",          450,  "4870200013834", "coca_cola_1l"),
+                ("Milka Almond 80g", "Сладости", "Молочный шоколад Milka с миндалём 80 г",         520,  "7622300441937", "milka_almond_80g"),
+                ("Piala 25 пак",     "Продукты", "Чай Piala чёрный в пакетиках 25 шт",             680,  "8712100851637", "piala_25b"),
+                ("Red Bull 250мл",   "Напитки",  "Энергетический напиток Red Bull 250 мл",         750,  "9002490100070", "red_bull_250ml"),
+            ],
+        )
+        return True
 
 
 async def create_product(

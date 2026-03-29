@@ -2,9 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies for bcrypt and asyncpg
+# Install system dependencies for bcrypt, asyncpg, and OpenCV (headless)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev libpq-dev && \
+    gcc libffi-dev libpq-dev libgl1 libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
