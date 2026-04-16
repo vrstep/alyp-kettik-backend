@@ -73,6 +73,13 @@ async def init_db():
                 added_at    TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS used_entry_tokens (
+                jti         TEXT PRIMARY KEY,
+                user_id     INTEGER NOT NULL,
+                used_at     TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
 
         # Seed only if products table is empty
         count = await conn.fetchval("SELECT COUNT(*) FROM products")

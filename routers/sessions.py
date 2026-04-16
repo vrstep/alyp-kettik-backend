@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -18,6 +19,8 @@ from database import (
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
+SESSION_TIMEOUT_MINUTES = 30
+
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
@@ -36,17 +39,32 @@ class UpdateCartItemRequest(BaseModel):
 
 # ── Session lifecycle ──────────────────────────────────────────────────────────
 
+async def _expire_if_stale(session: dict) -> bool:
+    """Check if session has been idle too long. Returns True if expired."""
+    started = session.get("started_at")
+    if started and hasattr(started, 'tzinfo'):
+        age = datetime.now(timezone.utc) - started
+        if age > timedelta(minutes=SESSION_TIMEOUT_MINUTES):
+            await update_session_status(session["id"], "expired")
+            return True
+    return False
+
+
 @router.post("/enter")
 async def enter_store(req: EnterStoreRequest, user: dict = Depends(get_current_user)):
     """User scans store QR code → creates an active shopping session."""
     # Check if user already has an active session
     active = await get_active_session(user["id"])
     if active:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="You already have an active shopping session",
-            headers={"X-Session-Id": active["id"]},
-        )
+        # Auto-expire stale sessions
+        if await _expire_if_stale(active):
+            pass  # Expired — allow new session
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You already have an active shopping session",
+                headers={"X-Session-Id": active["id"]},
+            )
 
     session_id = f"sess-{uuid.uuid4().hex[:12]}"
     session = await create_session(session_id, user["id"], req.qr_payload)
@@ -62,6 +80,14 @@ async def get_active(user: dict = Depends(get_current_user)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active shopping session",
         )
+
+    # Auto-expire stale sessions
+    if await _expire_if_stale(session):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session expired due to inactivity",
+        )
+
     items = await get_cart_items(session["id"])
     total = sum(item["price"] * item["quantity"] for item in items)
     return {"session": session, "cart_items": items, "total": total}

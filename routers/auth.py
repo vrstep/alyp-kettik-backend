@@ -59,8 +59,16 @@ def _create_token(user_id: int) -> str:
 
 
 def _safe_user(user: dict) -> dict:
-    """Strip password_hash before returning to client."""
-    return {k: v for k, v in user.items() if k != "password_hash"}
+    """Strip password_hash and serialise datetimes before returning to client."""
+    out = {}
+    for k, v in user.items():
+        if k == "password_hash":
+            continue
+        if isinstance(v, datetime):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
