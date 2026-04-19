@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from database import init_db, get_pool
-from routers import recognize, checkout, products, auth, sessions, entry
+from routers import recognize, checkout, products, auth, sessions, entry, payment
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(entry.router)
 app.include_router(recognize.router)
 app.include_router(checkout.router)
 app.include_router(products.router)
+app.include_router(payment.router)
 
 
 # Serve turnstile web app at /turnstile/

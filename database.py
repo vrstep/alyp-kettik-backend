@@ -81,6 +81,42 @@ async def init_db():
             )
         """)
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS payment_methods (
+                id          SERIAL PRIMARY KEY,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                card_type   TEXT NOT NULL,
+                last_four   TEXT NOT NULL,
+                holder_name TEXT NOT NULL,
+                expiry      TEXT NOT NULL,
+                is_default  BOOLEAN DEFAULT FALSE,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id          TEXT PRIMARY KEY,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                session_id  TEXT REFERENCES shopping_sessions(id),
+                payment_method_id INTEGER REFERENCES payment_methods(id),
+                status      TEXT NOT NULL DEFAULT 'paid',
+                total       NUMERIC(10,2) NOT NULL,
+                paid_at     TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS order_items (
+                id          SERIAL PRIMARY KEY,
+                order_id    TEXT NOT NULL REFERENCES orders(id),
+                product_id  INTEGER NOT NULL REFERENCES products(id),
+                name        TEXT NOT NULL,
+                price       NUMERIC(10,2) NOT NULL,
+                quantity    INTEGER NOT NULL
+            )
+        """)
+
         # Seed only if products table is empty
         count = await conn.fetchval("SELECT COUNT(*) FROM products")
         if count == 0:
@@ -89,11 +125,17 @@ async def init_db():
                    (name, category, description, price, barcode, yolo_class)
                    VALUES ($1, $2, $3, $4, $5, $6)""",
                 [
-                    ("BonAqua 1L",       "Напитки",  "Питьевая вода BonAqua без газа 1 литр",          200,  "4870200011502", "bon_aqua_1l"),
-                    ("Coca-Cola 1L",     "Напитки",  "Газированный напиток Coca-Cola 1 литр",          450,  "4870200013834", "coca_cola_1l"),
-                    ("Milka Almond 80g", "Сладости", "Молочный шоколад Milka с миндалём 80 г",         520,  "7622300441937", "milka_almond_80g"),
-                    ("Piala 25 пак",     "Продукты", "Чай Piala чёрный в пакетиках 25 шт",             680,  "8712100851637", "piala_25b"),
-                    ("Red Bull 250мл",   "Напитки",  "Энергетический напиток Red Bull 250 мл",         750,  "9002490100070", "red_bull_250ml"),
+                    ("BonAqua 1L",                 "Напитки",  "Питьевая вода BonAqua без газа 1 литр",                200,  "4870200011502", "bon_aqua_1l"),
+                    ("Coca-Cola 1L",               "Напитки",  "Газированный напиток Coca-Cola 1 литр",                450,  "4870200013834", "coca_cola_1l"),
+                    ("Яйца Казгер 10 шт",         "Продукты", "Куриные яйца Казгер 10 штук",                          590,  "4870000000001", "eggs_kazger_10p"),
+                    ("Кублей 325г",                "Продукты", "Кублей творожный 325 г",                               380,  "4870000000002", "kublei_325g"),
+                    ("Махеев Шашлык 500г",         "Соусы",    "Кетчуп Махеев Шашлык 500 г",                           490,  "4870000000003", "maheev_shashlyk_500g"),
+                    ("Майонез Ряба 364мл",         "Соусы",    "Майонез Ряба Провансаль 364 мл",                       420,  "4870000000004", "mayo_ryaba_364ml"),
+                    ("Молоко Петропавловск 3.2%",  "Молочные", "Молоко Петропавловск пастеризованное 3.2% 1 литр",     450,  "4870000000005", "milk_petropavlovsk_3.2"),
+                    ("Milka Almond 80g",           "Сладости", "Молочный шоколад Milka с миндалём 80 г",               520,  "7622300441937", "milka_almond_80g"),
+                    ("Piala 25 пак",               "Напитки",  "Чай Piala чёрный в пакетиках 25 шт",                   680,  "8712100851637", "piala_25b"),
+                    ("Red Bull 250мл",             "Напитки",  "Энергетический напиток Red Bull 250 мл",               750,  "9002490100070", "red_bull_250ml"),
+                    ("Twix 55г",                   "Сладости", "Шоколадный батончик Twix 55 г",                        350,  "5000159461122", "twix_55g"),
                 ],
             )
 
@@ -334,11 +376,17 @@ async def reseed_products():
                (name, category, description, price, barcode, yolo_class)
                VALUES ($1, $2, $3, $4, $5, $6)""",
             [
-                ("BonAqua 1L",       "Напитки",  "Питьевая вода BonAqua без газа 1 литр",          200,  "4870200011502", "bon_aqua_1l"),
-                ("Coca-Cola 1L",     "Напитки",  "Газированный напиток Coca-Cola 1 литр",          450,  "4870200013834", "coca_cola_1l"),
-                ("Milka Almond 80g", "Сладости", "Молочный шоколад Milka с миндалём 80 г",         520,  "7622300441937", "milka_almond_80g"),
-                ("Piala 25 пак",     "Продукты", "Чай Piala чёрный в пакетиках 25 шт",             680,  "8712100851637", "piala_25b"),
-                ("Red Bull 250мл",   "Напитки",  "Энергетический напиток Red Bull 250 мл",         750,  "9002490100070", "red_bull_250ml"),
+                ("BonAqua 1L",                 "Напитки",  "Питьевая вода BonAqua без газа 1 литр",                200,  "4870200011502", "bon_aqua_1l"),
+                ("Coca-Cola 1L",               "Напитки",  "Газированный напиток Coca-Cola 1 литр",                450,  "4870200013834", "coca_cola_1l"),
+                ("Яйца Казгер 10 шт",         "Продукты", "Куриные яйца Казгер 10 штук",                          590,  "4870000000001", "eggs_kazger_10p"),
+                ("Кублей 325г",                "Продукты", "Кублей творожный 325 г",                               380,  "4870000000002", "kublei_325g"),
+                ("Махеев Шашлык 500г",         "Соусы",    "Кетчуп Махеев Шашлык 500 г",                           490,  "4870000000003", "maheev_shashlyk_500g"),
+                ("Майонез Ряба 364мл",         "Соусы",    "Майонез Ряба Провансаль 364 мл",                       420,  "4870000000004", "mayo_ryaba_364ml"),
+                ("Молоко Петропавловск 3.2%",  "Молочные", "Молоко Петропавловск пастеризованное 3.2% 1 литр",     450,  "4870000000005", "milk_petropavlovsk_3.2"),
+                ("Milka Almond 80g",           "Сладости", "Молочный шоколад Milka с миндалём 80 г",               520,  "7622300441937", "milka_almond_80g"),
+                ("Piala 25 пак",               "Напитки",  "Чай Piala чёрный в пакетиках 25 шт",                   680,  "8712100851637", "piala_25b"),
+                ("Red Bull 250мл",             "Напитки",  "Энергетический напиток Red Bull 250 мл",               750,  "9002490100070", "red_bull_250ml"),
+                ("Twix 55г",                   "Сладости", "Шоколадный батончик Twix 55 г",                        350,  "5000159461122", "twix_55g"),
             ],
         )
         return True
@@ -413,3 +461,136 @@ async def delete_product(product_id: int) -> bool:
     async with pool.acquire() as conn:
         result = await conn.execute("DELETE FROM products WHERE id = $1", product_id)
         return result == "DELETE 1"
+
+
+# ── Payment method helpers ─────────────────────────────────────────────────────
+
+async def create_payment_method(
+    user_id: int, card_type: str, last_four: str, holder_name: str, expiry: str,
+) -> dict:
+    """Create a new payment method for a user."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # If this is the user's first card, make it default
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM payment_methods WHERE user_id = $1", user_id
+        )
+        is_default = count == 0
+
+        row = await conn.fetchrow(
+            """INSERT INTO payment_methods (user_id, card_type, last_four, holder_name, expiry, is_default)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING *""",
+            user_id, card_type, last_four, holder_name, expiry, is_default,
+        )
+        return dict(row)
+
+
+async def get_payment_methods(user_id: int) -> list[dict]:
+    """Get all payment methods for a user."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM payment_methods WHERE user_id = $1 ORDER BY is_default DESC, created_at DESC",
+            user_id,
+        )
+        return [dict(r) for r in rows]
+
+
+async def delete_payment_method(method_id: int, user_id: int) -> bool:
+    """Delete a payment method. Returns True if found and deleted."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM payment_methods WHERE id = $1 AND user_id = $2",
+            method_id, user_id,
+        )
+        return result == "DELETE 1"
+
+
+async def set_default_payment_method(method_id: int, user_id: int) -> bool:
+    """Set a payment method as the default (unsets others)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Verify it exists
+        row = await conn.fetchrow(
+            "SELECT id FROM payment_methods WHERE id = $1 AND user_id = $2",
+            method_id, user_id,
+        )
+        if not row:
+            return False
+        # Unset all defaults for this user
+        await conn.execute(
+            "UPDATE payment_methods SET is_default = FALSE WHERE user_id = $1",
+            user_id,
+        )
+        # Set new default
+        await conn.execute(
+            "UPDATE payment_methods SET is_default = TRUE WHERE id = $1",
+            method_id,
+        )
+        return True
+
+
+# ── Order helpers ──────────────────────────────────────────────────────────────
+
+async def create_order(
+    order_id: str, user_id: int, session_id: str | None,
+    payment_method_id: int, total: float, items: list[dict],
+) -> dict:
+    """Create an order with its items. Each item dict needs: product_id, name, price, quantity."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO orders (id, user_id, session_id, payment_method_id, status, total)
+                   VALUES ($1, $2, $3, $4, 'paid', $5)""",
+                order_id, user_id, session_id, payment_method_id, total,
+            )
+            for item in items:
+                await conn.execute(
+                    """INSERT INTO order_items (order_id, product_id, name, price, quantity)
+                       VALUES ($1, $2, $3, $4, $5)""",
+                    order_id, item["product_id"], item["name"],
+                    item["price"], item["quantity"],
+                )
+            row = await conn.fetchrow("SELECT * FROM orders WHERE id = $1", order_id)
+            return dict(row)
+
+
+async def get_user_orders(user_id: int) -> list[dict]:
+    """Get all orders for a user, newest first, with item count."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT o.*,
+                      (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                      pm.card_type, pm.last_four
+               FROM orders o
+               LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
+               WHERE o.user_id = $1
+               ORDER BY o.paid_at DESC""",
+            user_id,
+        )
+        return [dict(r) for r in rows]
+
+
+async def get_order_detail(order_id: str, user_id: int) -> dict | None:
+    """Get a single order with its items."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            """SELECT o.*, pm.card_type, pm.last_four, pm.holder_name AS card_holder
+               FROM orders o
+               LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
+               WHERE o.id = $1 AND o.user_id = $2""",
+            order_id, user_id,
+        )
+        if not order:
+            return None
+        items = await conn.fetch(
+            "SELECT * FROM order_items WHERE order_id = $1 ORDER BY id",
+            order_id,
+        )
+        result = dict(order)
+        result["items"] = [dict(i) for i in items]
+        return result
