@@ -22,14 +22,21 @@ logger = logging.getLogger(__name__)
 # ── Model loading ─────────────────────────────────────────────────────────────
 _MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "my_model.pt")
 _model: YOLO | None = None
+_device: str = "cpu"
 
 # YOLO class name → human-friendly DB product name mapping
 YOLO_CLASS_TO_PRODUCT = {
-    "bon_aqua_1l":       "BonAqua 1L",
-    "coca_cola_1l":      "Coca-Cola 1L",
-    "milka_almond_80g":  "Milka Almond 80g",
-    "piala_25b":         "Piala 25 пак",
-    "red_bull_250ml":    "Red Bull 250мл",
+    "bon_aqua_1l":           "BonAqua 1L",
+    "coca_cola_1l":          "Coca-Cola 1L",
+    "eggs_kazger_10p":       "Яйца Казгер 10 шт",
+    "kublei_325g":           "Кублей 325г",
+    "maheev_shashlyk_500g":  "Махеев Шашлык 500г",
+    "mayo_ryaba_364ml":      "Майонез Ряба 364мл",
+    "milk_petropavlovsk_3.2":"Молоко Петропавловск 3.2%",
+    "milka_almond_80g":      "Milka Almond 80g",
+    "piala_25b":             "Piala 25 пак",
+    "red_bull_250ml":        "Red Bull 250мл",
+    "twix_55g":              "Twix 55г",
 }
 
 CONFIDENCE_THRESHOLD = 0.5
@@ -37,13 +44,16 @@ CONFIDENCE_THRESHOLD = 0.5
 
 def get_model() -> YOLO:
     """Lazy-load the YOLO model (loaded once, reused for all requests)."""
-    global _model
+    global _model, _device
     if _model is None:
+        import torch
+
         if not os.path.exists(_MODEL_PATH):
             raise FileNotFoundError(f"YOLO model not found at {_MODEL_PATH}")
-        logger.info("Loading YOLO model from %s ...", _MODEL_PATH)
+        _device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        print(f"[YOLO] Loading model from {_MODEL_PATH} on {_device} ...")
         _model = YOLO(_MODEL_PATH, task="detect")
-        logger.info("YOLO model loaded. Classes: %s", _model.names)
+        print(f"[YOLO] Model loaded. Classes: {_model.names}")
     return _model
 
 
@@ -68,7 +78,7 @@ async def detect_from_image_bytes(image_bytes: bytes) -> dict:
 
     # Run YOLO inference
     model = get_model()
-    results = model(frame, verbose=False)
+    results = model(frame, verbose=False, device=_device)
     detections = results[0].boxes
 
     # Count detections per class (with max confidence per class)
