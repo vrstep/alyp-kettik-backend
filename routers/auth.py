@@ -1,12 +1,13 @@
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import bcrypt
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-from database import create_user, get_user_by_email
+from database import create_user, get_user_by_email, update_user_profile, update_user_password
 from auth_dependency import get_current_user, SECRET_KEY, ALGORITHM
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -33,6 +34,16 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class AuthResponse(BaseModel):
@@ -112,3 +123,41 @@ async def login(req: LoginRequest):
 @router.get("/me", response_model=UserResponse)
 async def me(user: dict = Depends(get_current_user)):
     return _safe_user(user)
+
+
+@router.put("/profile")
+async def update_profile(req: UpdateProfileRequest, user: dict = Depends(get_current_user)):
+    """Update the current user's name and/or email."""
+    if req.name is None and req.email is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    # If changing email, check it's not already taken by another user
+    if req.email is not None and req.email != user["email"]:
+        existing = await get_user_by_email(req.email)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already in use",
+            )
+
+    updated = await update_user_profile(user["id"], name=req.name, email=req.email)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _safe_user(updated)
+
+
+@router.put("/password")
+async def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    """Change the current user's password (requires current password)."""
+    if not _verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    new_hash = _hash_password(req.new_password)
+    await update_user_password(user["id"], new_hash)
+    return {"message": "Password updated successfully"}

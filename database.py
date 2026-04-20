@@ -167,6 +167,37 @@ async def get_user_by_id(user_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+async def update_user_profile(user_id: int, name: str | None = None, email: str | None = None) -> dict | None:
+    """Update user name and/or email. Returns updated user or None if not found."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        updates = []
+        params = []
+        idx = 1
+        for field, value in [("name", name), ("email", email)]:
+            if value is not None:
+                updates.append(f"{field} = ${idx}")
+                params.append(value)
+                idx += 1
+        if not updates:
+            return await get_user_by_id(user_id)
+        params.append(user_id)
+        sql = f"UPDATE users SET {', '.join(updates)} WHERE id = ${idx}"
+        await conn.execute(sql, *params)
+        return await get_user_by_id(user_id)
+
+
+async def update_user_password(user_id: int, new_password_hash: str) -> bool:
+    """Update user password hash. Returns True if updated."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE users SET password_hash = $1 WHERE id = $2",
+            new_password_hash, user_id,
+        )
+        return result == "UPDATE 1"
+
+
 # ── Shopping session helpers ───────────────────────────────────────────────────
 
 async def create_session(session_id: str, user_id: int, store_id: str) -> dict:
